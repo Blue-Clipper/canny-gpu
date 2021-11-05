@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(canny-gpu)
 
 find_package(CUDA QUIET REQUIRED)
+set(CUDA_NVCC_FLAGS -g;-G)
 
 find_package(OpenCV REQUIRED)
 message(STATUS "OpenCV library status:")
