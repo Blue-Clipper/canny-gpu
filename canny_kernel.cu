@@ -76,51 +76,63 @@ void gradient(int *strength, int *direction, int *origin, int rows, int cols) {
 
 __device__
 void findEdge(int *strength, int *direction, int *edge, int rows, int cols, 
-              int rowShift, int colShift, int i, int dir, int lowerThreshold) {
+              int rowShift, int colShift, int i, int dir, int lowerThreshold, int* visited) {
 	bool edgeEnd = false;
   int newRow = (i / cols) + rowShift;
 	int newCol = (i % cols) + colShift;
-    if(newRow < 0 || newRow >= rows) {
-        edgeEnd = true;
-    }
-    if(newCol < 0 || newCol >= cols) {
-        edgeEnd = true;
-    }
-    int idx = newRow * cols + newCol;
-    while((direction[idx] == dir) && !edgeEnd &&
-        (strength[idx] > lowerThreshold)) {
-            edge[idx] = 255;
-            newRow = newRow + rowShift;
-            newCol = newCol + colShift;
-            idx = newRow * cols + newCol;
-            if(newRow < 0 || newRow >= rows) {
-                break;
-            }
-            if(newCol < 0 || newRow >= cols) {
-                break;
-            }
-    }
+  if(newRow < 0 || newRow >= rows) {
+      edgeEnd = true;
+  }
+  if(newCol < 0 || newCol >= cols) {
+      edgeEnd = true;
+  }
+  int idx = newRow * cols + newCol;
+  if(visited[idx] == 1) {
+    return;
+  } else {
+    visited[idx] = 1;
+  }
+  while((direction[idx] == dir) && !edgeEnd &&
+      (strength[idx] > lowerThreshold)) {
+          edge[idx] = 255;
+          newRow = newRow + rowShift;
+          newCol = newCol + colShift;
+          idx = newRow * cols + newCol;
+          if(newRow < 0 || newRow >= rows) {
+              break;
+          }
+          if(newCol < 0 || newRow >= cols) {
+              break;
+          }
+          if(visited[idx] == 1) {
+            return;
+          } else {
+            visited[idx] = 1;
+          }
+  }
 }
 
 __global__
 void traceEdge(int *strength, int *direction, int *edge, 
-                int rows, int cols, int upperThreshold, int lowerThreshold) {
+                int rows, int cols, int upperThreshold, int lowerThreshold, int *visited) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
+
+
     for(int i = index; i < rows * cols; i += stride) {
       if(strength[i] > upperThreshold) {
           switch(direction[i]) {
               case 0:
-                  findEdge(strength, direction, edge, rows, cols, 0, 1, i, 0, lowerThreshold);
+                  findEdge(strength, direction, edge, rows, cols, 0, 1, i, 0, lowerThreshold, visited);
                   break;
               case 45:
-                  findEdge(strength, direction, edge, rows, cols, 1, 1, i, 45, lowerThreshold);
+                  findEdge(strength, direction, edge, rows, cols, 1, 1, i, 45, lowerThreshold, visited);
                   break;
               case 90:
-                  findEdge(strength, direction, edge, rows, cols, 1, 0, i, 90, lowerThreshold);
+                  findEdge(strength, direction, edge, rows, cols, 1, 0, i, 90, lowerThreshold, visited);
                   break;
               case 135:
-                  findEdge(strength, direction, edge, rows, cols, 1, -1, i, 135, lowerThreshold);
+                  findEdge(strength, direction, edge, rows, cols, 1, -1, i, 135, lowerThreshold, visited);
                   break;
               default :
                   edge[i] = 0;     
@@ -140,11 +152,10 @@ void canny(int *imageLine, int rows, int cols){
   cudaMallocManaged(&origin, rows * cols * sizeof(int));
   cudaMemcpy(origin,imageLine,rows * cols * sizeof(int),cudaMemcpyHostToDevice);
  
-  int blockSize = 256;
-  int numBlocks = (rows * cols + blockSize - 1) / blockSize;
+  int numBlocks = (rows * cols + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
   //gaussian_filter  
-  gaussian<<<numBlocks, blockSize>>>(img, origin, rows, cols);
+  gaussian<<<numBlocks, BLOCK_SIZE>>>(img, origin, rows, cols);
   cudaDeviceSynchronize();
 
 
@@ -155,10 +166,11 @@ void canny(int *imageLine, int rows, int cols){
     cout << "GPU Malloc Failed." << endl;
     return;
   }
-  gradient<<<numBlocks, blockSize>>>(strength, direction, img, rows, cols);
+  gradient<<<numBlocks, BLOCK_SIZE>>>(strength, direction, img, rows, cols);
   cudaDeviceSynchronize();
-
-  traceEdge<<<numBlocks, blockSize>>>(strength, direction, img, rows, cols, 100, 35);
+  int *visited;
+  cudaMallocManaged(&visited, rows*cols*sizeof(int));
+  traceEdge<<<numBlocks, BLOCK_SIZE>>>(strength, direction, img, rows, cols, 100, 35, visited);
   cudaDeviceSynchronize();
 
   cudaMemcpy(imageLine, img, rows * cols * sizeof(int), cudaMemcpyDeviceToHost);

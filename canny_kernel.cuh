@@ -1,5 +1,6 @@
 #include <iostream>
 #include <math.h>
+#define BLOCK_SIZE 256
 using namespace std;
 
 
