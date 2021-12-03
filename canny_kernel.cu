@@ -50,8 +50,8 @@ void gradient(int *strength, int *direction, int *origin, int rows, int cols) {
       int curCol = i % cols;
       int gx = 0;
       int gy = 0;
-      for(int rowOffset = -2; rowOffset <= 2; rowOffset ++) {
-        for(int colOffset = -2; colOffset <= 2; colOffset ++) {
+      for(int rowOffset = -1; rowOffset <= 1; rowOffset ++) {
+        for(int colOffset = -1; colOffset <= 1; colOffset ++) {
           int neighbourRow = curRow + rowOffset;
           int neighbourCol = curCol + colOffset;
           if(neighbourRow < 0 || neighbourRow >= rows || neighbourCol < 0 || neighbourCol >= cols) {
@@ -63,7 +63,7 @@ void gradient(int *strength, int *direction, int *origin, int rows, int cols) {
       }
       strength[i] = sqrtf(gx * gx + gy * gy);
       double angle = (atan2(float(gx), float(gy)) / M_PI) * 180.0;
-      if ( ( (angle < 22.5) && (angle > -22.5) ) || (angle > 157.5) || (angle < -157.5) )
+      if ( ( (angle < 22.5) && (angle > -22.5) ) || (angle > 157.5) || (angle < -157.5))
 				direction[i] = 0;
 			else if ( ( (angle > 22.5) && (angle < 67.5) ) || ( (angle < -112.5) && (angle > -157.5) ) )
 				direction[i] = 45;
@@ -103,7 +103,7 @@ void findEdge(int *strength, int *direction, int *edge, int rows, int cols,
 }
 
 __global__
-void trageEdge(int *strength, int *direction, int *edge, 
+void traceEdge(int *strength, int *direction, int *edge, 
                 int rows, int cols, int upperThreshold, int lowerThreshold) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
@@ -138,39 +138,30 @@ void canny(int *imageLine, int rows, int cols){
 
   cudaMallocManaged(&img, rows*cols*sizeof(int));
   cudaMallocManaged(&origin, rows * cols * sizeof(int));
-
-  if(img == NULL || origin == NULL) {
-    cout << "GPU Malloc Failed." << endl;
-    return;
-  }
-
-  for(int i = 0; i < rows * cols; i ++) {
-    img[i] = imageLine[i];
-    origin[i] = imageLine[i];
-  }
-
+  cudaMemcpy(origin,imageLine,rows * cols * sizeof(int),cudaMemcpyHostToDevice);
+ 
   int blockSize = 256;
   int numBlocks = (rows * cols + blockSize - 1) / blockSize;
+
   //gaussian_filter  
   gaussian<<<numBlocks, blockSize>>>(img, origin, rows, cols);
-  
+  cudaDeviceSynchronize();
+
 
   int *strength = NULL, *direction = NULL;
   cudaMallocManaged(&strength, rows*cols*sizeof(int));
   cudaMallocManaged(&direction, rows * cols * sizeof(int));
-  
   if(strength == NULL || direction == NULL) {
     cout << "GPU Malloc Failed." << endl;
     return;
   }
   gradient<<<numBlocks, blockSize>>>(strength, direction, img, rows, cols);
-
-  trageEdge<<<numBlocks, blockSize>>>(strength, direction, img, rows, cols, 100, 60);
-
   cudaDeviceSynchronize();
-  for(int i = 0; i < rows * cols; i ++) {
-    imageLine[i] = img[i];
-  }
+
+  traceEdge<<<numBlocks, blockSize>>>(strength, direction, img, rows, cols, 100, 35);
+  cudaDeviceSynchronize();
+
+  cudaMemcpy(imageLine, img, rows * cols * sizeof(int), cudaMemcpyDeviceToHost);
   cudaFree(img);
   cudaFree(origin);
   cudaFree(strength);
