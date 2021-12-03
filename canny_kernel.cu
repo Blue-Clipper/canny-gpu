@@ -1,7 +1,8 @@
 #include "canny_kernel.cuh"
-
+#include "convolutionSeparable_common.h"
 __global__ 
 void gaussian(int *img, int *origin, int rows, int cols) {
+    extern __shared__ int imgPiece[20][20];
     int gaussianMask[5][5] = {
                                 {1, 4, 7, 4, 1},
                                 {4, 16, 26, 16, 4},
@@ -15,7 +16,9 @@ void gaussian(int *img, int *origin, int rows, int cols) {
         int curRow = i / cols;
         int curCol = i % cols;
         int newPixel = 0;
+        #pragma unroll
         for(int rowOffset = -2; rowOffset <= 2; rowOffset ++) {
+          #pragma unroll
           for(int colOffset = -2; colOffset <= 2; colOffset ++) {
               int neighbourRow = curRow + rowOffset;
               int neighbourCol = curCol + colOffset;
@@ -50,7 +53,9 @@ void gradient(int *strength, int *direction, int *origin, int rows, int cols) {
       int curCol = i % cols;
       int gx = 0;
       int gy = 0;
+      #pragma unroll
       for(int rowOffset = -1; rowOffset <= 1; rowOffset ++) {
+        #pragma unroll
         for(int colOffset = -1; colOffset <= 1; colOffset ++) {
           int neighbourRow = curRow + rowOffset;
           int neighbourCol = curCol + colOffset;
@@ -154,11 +159,43 @@ void canny(int *imageLine, int rows, int cols){
  
   int numBlocks = (rows * cols + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-  //gaussian_filter  
-  gaussian<<<numBlocks, BLOCK_SIZE>>>(img, origin, rows, cols);
-  cudaDeviceSynchronize();
+  // //gaussian_filter  
+  // gaussian<<<numBlocks, BLOCK_SIZE>>>(img, origin, rows, cols);
+  // cudaDeviceSynchronize();
+////////////////////////////////////////////////////////////////////////////////
+// Gaussian Filter
+////////////////////////////////////////////////////////////////////////////////
+const int imageW = cols;
+const int imageH = rows;
+float *h_Kernel, *h_OutputGPU;
+float *d_Input, *d_Output, *d_Buffer;
+int *imgFloat = (int*)malloc(imageW * imageH * sizeof(float));
+for(int i = 0; i < imageH * imageW; i ++) {
+  imgFloat[i] = float(imageLine[i]);
+}
+h_Kernel = (float *)malloc(KERNEL_LENGTH * sizeof(float));
+for (unsigned int i = 0; i < KERNEL_LENGTH; i++) {
+  h_Kernel[i] = (float)(rand() % 16);
+}
+setConvolutionKernel(h_Kernel);
 
+h_OutputGPU = (float *)malloc(imageW * imageH * sizeof(float));
+cudaMalloc((void **)&d_Input, imageW * imageH * sizeof(float));
+cudaMalloc((void **)&d_Output, imageW * imageH * sizeof(float));
+cudaMalloc((void **)&d_Buffer, imageW * imageH * sizeof(float));
+if(!d_Input || !d_Output || !d_Buffer) {
+  cout << "GPU Malloc Failed." << endl;
+  return;
+}
+cudaMemcpy(d_Input,imgFloat,rows * cols * sizeof(float),cudaMemcpyHostToDevice);
 
+convolutionRowsGPU(d_Buffer, d_Input, imageW, imageH);
+convolutionColumnsGPU(d_Output, d_Buffer, imageW, imageH);
+cudaMemcpy(imgFloat,d_Output,rows * cols * sizeof(float),cudaMemcpyHostToDevice);
+for(int i = 0; i < imageH * imageW; i ++) {
+  img[i] = int(imgFloat[i]);
+}
+////////////////////////////////////////////////////////////////////////////////
   int *strength = NULL, *direction = NULL;
   cudaMallocManaged(&strength, rows*cols*sizeof(int));
   cudaMallocManaged(&direction, rows * cols * sizeof(int));

@@ -21,6 +21,10 @@ cuda_add_executable(
     canny_kernel.cuh
     io.h 
     io.cpp
+    helper_cuda.h
+    helper_string.h
+    convolutionSeparable_common.h
+    convolutionSeparable.cu
 )
 target_link_libraries( canny-gpu ${OpenCV_LIBS} )    
 
